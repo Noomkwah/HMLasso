@@ -38,7 +38,7 @@ class HMLasso():
   Common uses: Once fitted, the HMLasso can provide linear predictions. 
   It can also be used to select variables of interest from the given data. This 
   second goal can be achieved through selection of variables whose coefficient
-  is almost (or equal to) zero.
+  is almost (or equal to) zero. For fitting purpose, X and y must have mean = 0. 
 
   Please note that no metric is implemented in this class for now. 
   See sklearn.metrics.mean_squared_error or like for useful metrics.
@@ -73,7 +73,8 @@ class HMLasso():
       performances. alpha must be positive.
       See source article for more.
 
-      fit_intercept : bool, default=True: 
+      fit_intercept : bool, default=False: control whether the constant predictor
+      is used to fit the model. NOT IMPLEMENTED YET.
 
       verbose : bool, default=False: control whether the verbose is dispayed.
       Set verbose = True for it to be printed.
@@ -83,7 +84,7 @@ class HMLasso():
       fit(self, X, y, errors="ignore"):
         Fit the HMLasso on (X, y)
         X, the features, must be a mean-centered numpy array of shape (n, p)
-        y, the labels, must be a vector of shape (n, 1) or (n,)
+        y, the labels, must be a mean-centered vector of shape (n, 1) or (n,)
 
         Do not return anything. However, once the fitting is done, one can
         use 'predict' method to predict any given output using the linear model.
@@ -95,13 +96,11 @@ class HMLasso():
   ------------
   Constants:
       beta_opt: the estimator.
-
-
   """
 
   global ERRORS_HANDLING
 
-  def __init__(self, mu=1, alpha=1, fit_intercept=True, verbose=False):
+  def __init__(self, mu=1, alpha=1, fit_intercept=False, verbose=False):
 
     assert isinstance(mu, (int, float)), "mu must be a number."
     assert isinstance(alpha, (int, float)), "alpha must be a number."
@@ -113,6 +112,7 @@ class HMLasso():
     self.mu = mu
     self.alpha = alpha
     self.verbose = verbose
+    self.fit_intercept = fit_intercept # Unused at the moment.
     
     self.n = None
     self.p = None
@@ -121,6 +121,8 @@ class HMLasso():
     self.R = None
     self.Sigma_opt = None
     self.beta_opt = None
+    self.coef_ = None # Unused at the moment.
+    self.intercept_ = None # Unused at the moment.
 
     self.isFirstProblemSolved = False
     self.isSecondProblemSolved = False # Unused at the moment.
@@ -139,11 +141,11 @@ class HMLasso():
     """
 
     assert self.isFitted, "The model has not yet been fitted."
-    assert X.shape[1] == self.p, f"Given data is of dimension {X.shape[1]}. Must have dimension {self.p})."
+    assert X.shape[1] == self.p, f"Given data is of dimension {X.shape[1]}. Must have dimension {self.p-1})."
     assert not np.isnan(X).any(), "Input contains NaN."
 
     return np.dot(X, self.beta_opt)
-  
+
   def fit(self, X, y):
     """
     Fit the HMLasso on (X, y).
@@ -152,7 +154,8 @@ class HMLasso():
     Parameters:
         X : 2D numpy array, shape (n,p). It corresponds to the features, and
         must be mean-centered.
-        y : 1D numpy array, shape (n,1) or (n,). It corresponds to the labels.
+        y : 1D numpy array, shape (n,1) or (n,). It corresponds to the labels,
+        and must be mean-centered.
 
     Returns:
         None
@@ -164,7 +167,7 @@ class HMLasso():
     assert len(y.shape) == 1, "Labels are not a vector."
 
     self.n, self.p = X.shape    
-    self.__verify_centering__(X)
+    self.__verify_centering__(X, y)
     self.S_pair, self.rho_pair, self.R = self.__impute_params__(X, y)
     self.Sigma_opt = self.__solve_first_problem__()
 
@@ -190,14 +193,15 @@ class HMLasso():
     if self.verbose:
       print("Model fitted.")
 
-  def __verify_centering__(self, X, tolerance=1e-8):
+  def __verify_centering__(self, X, y, tolerance=1e-8):
     for col in range(self.p):
       current_mean = X[:, col].mean()
       if abs(current_mean) > tolerance:
         raise Exception(f"Data is not centered: column {col} has mean of {current_mean}")
-  
-  def __impute_params__(self, X, y):
+    if abs(y.mean()) > tolerance:
+        raise Exception(f"Target is not centered: mean = {y.mean()}")
 
+  def __impute_params__(self, X, y):
     if self.verbose:
       print("[Imputing parameters] Starting...")
 
@@ -286,8 +290,12 @@ class HMLasso():
 """## Test"""
 
 def get_Xy(n, p, replace_rate=0.3):
-  X = 100*np.random.rand(n,p) # Generate random X
-  y = 7*X[:, 0] - 2 * X[:, 1] + 5 * X[:, 2] + 19 * X[:, 3] + 6*X[:, 4]
+  X = 100*(np.random.rand(n,p)-0.5) # Generate random X
+  
+  if p > 3:
+    y = 7*X[:, 0] - 2 * X[:, 1] + 5 * X[:, 2] + 19 * X[:, 3] + 6*X[:, 4]
+  else:
+    y = 7*X[:, 0] - 2 * X[:, 1]
   
   indices = np.full(X.shape, False, bool)
   mask = np.random.choice([False, True], size=X.shape, p=((1 - replace_rate), replace_rate))
@@ -296,18 +304,13 @@ def get_Xy(n, p, replace_rate=0.3):
   return X, y
 
 if __name__ == "__main__":
-  count = 0
-  for i in range(100):
-    try:
-      X, y = get_Xy(10000, 20, 0.4)
+  X, y = get_Xy(10000, 20, 0.4)
 
-      scaler = StandardScaler(with_std=False)
-      X_scaled = scaler.fit_transform(X)
-      lasso = HMLasso(mu=100, alpha=1, verbose=False)
-      lasso.fit(X_scaled, y)
-      X_test, y_test = get_Xy(10000, 20, replace_rate=0.)
-    except:
-      count += 1
-  print(count)
-
-isinstance("a", (int, float))
+  scaler = StandardScaler(with_std=False)
+  X_scaled = scaler.fit_transform(X)
+  lasso = HMLasso(mu=1, alpha=1, verbose=False)
+  lasso.fit(X_scaled, y-y.mean())
+  X_test, y_test = get_Xy(10000, 20, replace_rate=0.)
+  residuals = y_test - lasso.predict(X_test)
+  print(abs(residuals).mean(), np.sqrt(sum(residuals**2/len(residuals))))
+  print(lasso.beta_opt.round(1))
